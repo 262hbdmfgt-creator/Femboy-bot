@@ -25,11 +25,14 @@ pending_broadcast = {}     # user_id -> список сообщений
 @dp.update.outer_middleware()
 async def track_chats_middleware(handler, event, data):
     # Сохраняем чат, в котором произошло событие
-    if event.chat:
-        try:
-            db.add_chat(event.chat.id, event.chat.type, event.chat.title or "")
-        except Exception:
-            pass
+    chat = None
+    if hasattr(event, 'message') and event.message:
+        chat = event.message.chat
+    elif hasattr(event, 'callback_query') and event.callback_query and event.callback_query.message:
+        chat = event.callback_query.message.chat
+    
+    if chat:
+        await db.add_chat(chat.id, chat.title or "Private")
     return await handler(event, data)
 
 
