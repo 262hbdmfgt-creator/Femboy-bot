@@ -32,7 +32,7 @@ async def track_chats_middleware(handler, event, data):
         chat = event.callback_query.message.chat
     
     if chat:
-        await db.add_chat(chat.id, chat.type, chat.title or "Private")
+        db.add_chat(chat.id, chat.type, chat.title or "Private")
     return await handler(event, data)
 
 
