@@ -267,15 +267,17 @@ def use_admin_code(code):
 # ---------- CHATS (для /add рассылки) ----------
 
 def add_chat(chat_id, chat_type, title):
-    init_db()
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT OR REPLACE INTO chats (chat_id, type, title, added_at) VALUES (?, ?, ?, ?)
-    """, (chat_id, chat_type, title, int(time.time())))
-    conn.commit()
-    conn.close()
-
+    try:
+        init_db()
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO chats (chat_id, type, title, added_at) VALUES (?, ?, ?, ?)
+        """, (chat_id, chat_type, title, int(time.time())))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"add_chat error: {e}")
 
 def get_all_chats():
     conn = get_conn()
