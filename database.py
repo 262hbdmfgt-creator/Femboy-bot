@@ -267,6 +267,7 @@ def use_admin_code(code):
 # ---------- CHATS (для /add рассылки) ----------
 
 def add_chat(chat_id, chat_type, title):
+    init_db()
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
