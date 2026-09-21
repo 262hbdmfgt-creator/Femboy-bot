@@ -374,7 +374,7 @@ async def cmd_make_me_admin(message: types.Message):
 # ============== RUN ==============
 
 async def main():
-    db.init_db()
+    await db.init_db()
     print("Bot started.")
     await dp.start_polling(bot)
 
