@@ -37,7 +37,7 @@ async def track_chats_middleware(handler, event, data):
         chat = event.callback_query.message.chat
     
     if chat:
-        db.add_chat(chat.id, chat.type, chat.title or "Private")
+        await db.add_chat(chat.id, chat.type, chat.title or "Private")
     return await handler(event, data)
 
 
@@ -45,7 +45,7 @@ async def track_chats_middleware(handler, event, data):
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    db.register_user(message.from_user)
+    await db.register_user(message.from_user)
     text = (
         "👋 Привет! Я бот с коллекцией фембоев.\n\n"
         "Команды:\n"
@@ -63,13 +63,13 @@ def rarity_name(code):
 
 
 async def send_random_foto(chat_id: int, user_id: int):
-    photo = db.get_random_photo()
+    photo = await db.get_random_photo()
     if not photo:
         await bot.send_message(chat_id, "😔 Пока нет фото в базе. Попроси админа добавить.")
         return
 
-    db.give_photo_to_user(user_id, photo["id"])
-    db.set_last_foto(user_id)
+    await db.give_photo_to_user(user_id, photo["id"])
+    await db.set_last_foto(user_id)
 
     caption = (
         f"✨ <b>{rarity_name(photo['rarity'])}</b>\n\n"
@@ -86,8 +86,8 @@ async def send_random_foto(chat_id: int, user_id: int):
 @dp.message(F.text.casefold().in_({"фем", "фембой", "фембойчик"}))
 async def cmd_foto(message: types.Message):
     user = message.from_user
-    db.register_user(user)
-    user_row = db.get_user(user.id)
+    await db.register_user(user)
+    user_row = await db.get_user(user.id)
 
     last = user_row["last_foto_at"] if user_row else 0
     elapsed = time.time() - last
@@ -106,7 +106,7 @@ async def cmd_foto(message: types.Message):
 # ============== /profil ==============
 
 async def show_profile_message(target_message: types.Message, user_id: int, first_name: str):
-    count = db.get_user_photo_count(user_id)
+    count = await db.get_user_photo_count(user_id)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📂 Смотреть все фото", callback_data="show_all_0")]
     ])
@@ -137,14 +137,14 @@ async def show_profile_message(target_message: types.Message, user_id: int, firs
 @dp.message(Command("profil"))
 @dp.message(F.text.casefold().in_({"профиль", "профил"}))
 async def cmd_profil(message: types.Message):
-    db.register_user(message.from_user)
+    await db.register_user(message.from_user)
     await show_profile_message(message, message.from_user.id, message.from_user.first_name or "Игрок")
 
 
 @dp.callback_query(F.data.startswith("show_all_"))
 async def cb_show_all(call: types.CallbackQuery):
     user_id = call.from_user.id
-    photos = db.get_user_photos_ordered(user_id)
+    photos = await db.get_user_photos_ordered(user_id)
 
     if not photos:
         await call.answer("Коллекция пуста 😔", show_alert=True)
@@ -207,7 +207,7 @@ async def cmd_admin(message: types.Message):
 
 @dp.message(Command("plus_foto"))
 async def cmd_plus_foto(message: types.Message):
-    if not db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
+    if not await db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
         return
     pending_add_foto[message.from_user.id] = {"step": "rarity"}
     await message.answer("🎯 Готов принять фото. Напиши редкость одним словом:\n"
@@ -245,7 +245,7 @@ async def catch_photo(message: types.Message):
 
     file_id = message.photo[-1].file_id
     caption = message.caption or ""
-    photo_id = db.add_photo(file_id, caption, state["rarity"])
+    photo_id = await db.add_photo(file_id, caption, state["rarity"])
 
     del pending_add_foto[message.from_user.id]
     await message.answer(f"✅ Сохранено, фото #{photo_id}")
@@ -255,7 +255,7 @@ async def catch_photo(message: types.Message):
 
 @dp.message(Command("delete_foto"))
 async def cmd_delete_foto(message: types.Message):
-    if not db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
+    if not await db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
         return
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
@@ -266,7 +266,7 @@ async def cmd_delete_foto(message: types.Message):
         await message.answer("Номер должен быть числом.")
         return
     photo_id = int(arg)
-    if db.delete_photo(photo_id):
+    if await db.delete_photo(photo_id):
         await message.answer(f"🗑 Фото #{photo_id} удалено.")
     else:
         await message.answer(f"❌ Фото #{photo_id} не найдено.")
@@ -276,7 +276,7 @@ async def cmd_delete_foto(message: types.Message):
 
 @dp.message(Command("add"))
 async def cmd_add(message: types.Message):
-    if not db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
+    if not await db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
         return
     pending_broadcast[message.from_user.id] = []
     await message.answer("📨 Режим рассылки. Отправляй сообщения (текст/фото), в конце напиши /save")
@@ -284,7 +284,7 @@ async def cmd_add(message: types.Message):
 
 @dp.message(Command("save"))
 async def cmd_save(message: types.Message):
-    if not db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
+    if not await db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
         return
     user_id = message.from_user.id
     if user_id not in pending_broadcast:
@@ -301,7 +301,7 @@ async def cmd_save(message: types.Message):
 
 @dp.message(Command("send_all"))
 async def cmd_send_all(message: types.Message):
-    if not db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
+    if not await db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
         return
     # Берём последние сообщения в чате и рассылаем их
     # (упрощённо — рассылаем то, что было в pending_broadcast — мы их не сохранили, поэтому используем другой подход)
@@ -312,7 +312,7 @@ async def do_broadcast(message: types.Message):
     """Рассылает все сообщения после /add и до /save. 
     Реализация: сохраняем message_id последнего /add и шлём всё, что было после."""
     # Эта упрощённая версия рассылает ОДНО сообщение — последнее перед /send_all.
-    chats = db.get_all_chats()
+    chats = await db.get_all_chats()
     sent = 0
     failed = 0
     for chat in chats:
@@ -332,9 +332,9 @@ async def do_broadcast(message: types.Message):
 
 @dp.message(Command("now_admin_cod"))
 async def cmd_now_admin_cod(message: types.Message):
-    if not db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
+    if not await db.is_admin(message.from_user.id, SUPER_ADMIN_ID):
         return
-    code = db.create_admin_code(message.from_user.id)
+    code = await db.create_admin_code(message.from_user.id)
     await message.answer(
         f"🔑 Код для нового админа (действует 3 часа):\n\n"
         f"<code>{code}</code>\n\n"
@@ -345,17 +345,17 @@ async def cmd_now_admin_cod(message: types.Message):
 
 @dp.message(Command("I_am_admin"))
 async def cmd_i_am_admin(message: types.Message):
-    db.register_user(message.from_user)
+    await db.register_user(message.from_user)
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.answer("Введи код после команды. Например: /I_am_admin Abc12345")
         return
     code = args[1].strip()
-    created_by = db.use_admin_code(code)
+    created_by = await db.use_admin_code(code)
     if created_by is None:
         await message.answer("❌ Неверный или просроченный код. Попроси новый у действующего админа.")
         return
-    db.add_admin(message.from_user.id)
+    await db.add_admin(message.from_user.id)
     await message.answer("✅ Ты теперь админ бота!")
 
 
@@ -367,7 +367,7 @@ async def cmd_make_me_admin(message: types.Message):
     Работает ТОЛЬКО для SUPER_ADMIN_ID, и только если в базе ещё нет админов."""
     if message.from_user.id != SUPER_ADMIN_ID:
         return
-    db.add_admin(SUPER_ADMIN_ID)
+    await db.add_admin(SUPER_ADMIN_ID)
     await message.answer("✅ Ты зарегистрирован как супер-админ.")
 
 
