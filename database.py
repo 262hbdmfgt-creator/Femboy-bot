@@ -1,288 +1,156 @@
-import sqlite3
+import aiosqlite
 import time
-from config import DB_PATH, RARITIES
+import os
+
+DB_PATH = os.getenv("DB_PATH", "bot.db")
 
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+async def init_db():
+    """Создаёт все таблицы. Вызывается один раз при старте бота."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Таблица чатов
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS chats (
+                chat_id INTEGER PRIMARY KEY,
+                type TEXT,
+                title TEXT,
+                added_at INTEGER
+            )
+        """)
+
+        # Таблица пользователей
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                registered_at INTEGER
+            )
+        """)
+
+        # Таблица фото пользователей (для коллекции)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_photos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                file_id TEXT,
+                rarity TEXT,
+                caption TEXT,
+                added_at INTEGER
+            )
+        """)
+
+        # Таблица профилей
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS profiles (
+                user_id INTEGER PRIMARY KEY,
+                bio TEXT,
+                collection_count INTEGER DEFAULT 0,
+                rare_count INTEGER DEFAULT 0
+            )
+        """)
+
+        await db.commit()
 
 
-def init_db():
-    """Создаёт таблицы, если их нет."""
-    conn = get_conn()
-    cur = conn.cursor()
-
-    # Фото
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS photos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id TEXT NOT NULL,
-            caption TEXT,
-            rarity TEXT NOT NULL,
-            created_at INTEGER NOT NULL
-        )
-    """)
-
-    # Пользователи
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            last_foto_at INTEGER DEFAULT 0,
-            registered_at INTEGER NOT NULL
-        )
-    """)
-
-    # Связь пользователь <-> полученные фото (чтобы знать коллекцию)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS user_photos (
-            user_id INTEGER NOT NULL,
-            photo_id INTEGER NOT NULL,
-            obtained_at INTEGER NOT NULL,
-            PRIMARY KEY (user_id, photo_id)
-        )
-    """)
-
-    # Админы
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS admins (
-            user_id INTEGER PRIMARY KEY,
-            added_at INTEGER NOT NULL
-        )
-    """)
-
-    # Одноразовые коды для /I_am_admin
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS admin_codes (
-            code TEXT PRIMARY KEY,
-            created_by INTEGER NOT NULL,
-            created_at INTEGER NOT NULL,
-            used INTEGER DEFAULT 0
-        )
-    """)
-
-    # Все чаты, в которых бот состоит (для /add рассылки)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS chats (
-            chat_id INTEGER PRIMARY KEY,
-            type TEXT NOT NULL,
-            title TEXT,
-            added_at INTEGER NOT NULL
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-
-# ---------- USERS ----------
-
-def register_user(user):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT OR IGNORE INTO users (user_id, username, first_name, registered_at)
-        VALUES (?, ?, ?, ?)
-    """, (user.id, user.username, user.first_name, int(time.time())))
-    conn.commit()
-    conn.close()
-
-
-def get_user(user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-
-def set_last_foto(user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET last_foto_at = ? WHERE user_id = ?",
-                (int(time.time()), user_id))
-    conn.commit()
-    conn.close()
-
-
-# ---------- PHOTOS ----------
-
-def add_photo(file_id, caption, rarity):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO photos (file_id, caption, rarity, created_at)
-        VALUES (?, ?, ?, ?)
-    """, (file_id, caption, rarity, int(time.time())))
-    photo_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return photo_id
-
-
-def get_random_photo():
-    """Возвращает фото согласно шансам редкости."""
-    import random
-    conn = get_conn()
-    cur = conn.cursor()
-
-    rand = random.randint(1, 100)
-    cumulative = 0
-    chosen_rarity = None
-    for code, (_, chance) in RARITIES.items():
-        cumulative += chance
-        if rand <= cumulative:
-            chosen_rarity = code
-            break
-
-    # Берём случайное фото этой редкости
-    cur.execute("SELECT * FROM photos WHERE rarity = ? ORDER BY RANDOM() LIMIT 1",
-                (chosen_rarity,))
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-
-def get_photo(photo_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM photos WHERE id = ?", (photo_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-
-def delete_photo(photo_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM photos WHERE id = ?", (photo_id,))
-    affected = cur.rowcount
-    # удаляем из коллекций пользователей
-    cur.execute("DELETE FROM user_photos WHERE photo_id = ?", (photo_id,))
-    conn.commit()
-    conn.close()
-    return affected > 0
-
-
-def give_photo_to_user(user_id, photo_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT OR IGNORE INTO user_photos (user_id, photo_id, obtained_at)
-        VALUES (?, ?, ?)
-    """, (user_id, photo_id, int(time.time())))
-    conn.commit()
-    conn.close()
-
-
-def get_user_photos_ordered(user_id):
-    """Возвращает список фото пользователя, отсортированный по редкости (от самой редкой)."""
-    rarity_priority = {code: i for i, code in enumerate(RARITY_ORDER)}
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT p.* FROM photos p
-        JOIN user_photos up ON p.id = up.photo_id
-        WHERE up.user_id = ?
-    """, (user_id,))
-    rows = cur.fetchall()
-    conn.close()
-    rows = list(rows)
-    rows.sort(key=lambda r: (rarity_priority.get(r["rarity"], 99), -r["id"]))
-    return rows
-
-
-def get_user_photo_count(user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) AS cnt FROM user_photos WHERE user_id = ?",
-                (user_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row["cnt"]
-
-
-# ---------- ADMINS ----------
-
-def is_admin(user_id, super_admin_id):
-    if user_id == super_admin_id:
-        return True
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row is not None
-
-
-def add_admin(user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO admins (user_id, added_at) VALUES (?, ?)",
-                (user_id, int(time.time())))
-    conn.commit()
-    conn.close()
-
-
-def create_admin_code(created_by):
-    import random, string
-    digits = "".join(random.choices(string.digits, k=7))
-    letters = "".join(random.choices(string.ascii_letters, k=3))
-    code_chars = list(digits + letters)
-    random.shuffle(code_chars)
-    code = "".join(code_chars)
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO admin_codes (code, created_by, created_at) VALUES (?, ?, ?)
-    """, (code, created_by, int(time.time())))
-    conn.commit()
-    conn.close()
-    return code
-
-
-def use_admin_code(code):
-    """Проверяет код. Возвращает created_by если валидный, иначе None."""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM admin_codes WHERE code = ? AND used = 0", (code,))
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return None
-    # Проверяем срок (3 часа)
-    if int(time.time()) - row["created_at"] > 3 * 3600:
-        conn.close()
-        return None
-    cur.execute("UPDATE admin_codes SET used = 1 WHERE code = ?", (code,))
-    conn.commit()
-    conn.close()
-    return row["created_by"]
-
-
-# ---------- CHATS (для /add рассылки) ----------
-
-def add_chat(chat_id, chat_type, title):
+async def add_chat(chat_id, chat_type, title):
+    """Добавляет или обновляет чат."""
     try:
-        init_db()
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT OR REPLACE INTO chats (chat_id, type, title, added_at) VALUES (?, ?, ?, ?)
-        """, (chat_id, chat_type, title, int(time.time())))
-        conn.commit()
-        conn.close()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO chats (chat_id, type, title, added_at) VALUES (?, ?, ?, ?)",
+                (chat_id, chat_type, title, int(time.time()))
+            )
+            await db.commit()
     except Exception as e:
         print(f"add_chat error: {e}")
 
-def get_all_chats():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM chats")
-    rows = cur.fetchall()
-    conn.close()
-    return rows
+
+async def add_user(user_id, username=None, first_name=None, last_name=None):
+    """Добавляет или обновляет пользователя."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """INSERT OR REPLACE INTO users 
+                   (user_id, username, first_name, last_name, registered_at) 
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, username, first_name, last_name, int(time.time()))
+            )
+            await db.commit()
+    except Exception as e:
+        print(f"add_user error: {e}")
+
+
+async def add_photo(user_id, file_id, rarity, caption):
+    """Добавляет фото в коллекцию пользователя."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """INSERT INTO user_photos 
+                   (user_id, file_id, rarity, caption, added_at) 
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, file_id, rarity, caption, int(time.time()))
+            )
+            await db.commit()
+    except Exception as e:
+        print(f"add_photo error: {e}")
+
+
+async def get_user_photos(user_id, limit=50):
+    """Возвращает фото пользователя."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM user_photos WHERE user_id = ? ORDER BY added_at DESC LIMIT ?",
+                (user_id, limit)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"get_user_photos error: {e}")
+        return []
+
+
+async def delete_photo(photo_id):
+    """Удаляет фото по id."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "DELETE FROM user_photos WHERE id = ?",
+                (photo_id,)
+            )
+            await db.commit()
+    except Exception as e:
+        print(f"delete_photo error: {e}")
+
+
+async def get_profile(user_id):
+    """Возвращает профиль пользователя."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM profiles WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+    except Exception as e:
+        print(f"get_profile error: {e}")
+        return None
+
+
+async def update_profile(user_id, bio=None):
+    """Обновляет био профиля."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """INSERT INTO profiles (user_id, bio) VALUES (?, ?)
+                   ON CONFLICT(user_id) DO UPDATE SET bio = excluded.bio""",
+                (user_id, bio)
+            )
+            await db.commit()
+    except Exception as e:
+        print(f"update_profile error: {e}")
