@@ -374,7 +374,22 @@ async def cmd_make_me_admin(message: types.Message):
 # ============== RUN ==============
 
 async def main():
-    await db.init_db()
-    print("Bot started.")
-    await bot.delete_webhook(drop_pending_updates=True)
+    print("=== STARTUP ===", flush=True)
+    print(f"BOT_TOKEN length: {len(BOT_TOKEN) if BOT_TOKEN else 0}", flush=True)
+    print(f"SUPER_ADMIN_ID: {SUPER_ADMIN_ID}", flush=True)
+    print(f"DB_PATH: {DB_PATH}", flush=True)
+    try:
+        print("Calling db.init_db()...", flush=True)
+        await db.init_db()
+        print("db.init_db() done.", flush=True)
+    except Exception as e:
+        print(f"DB INIT ERROR: {type(e).__name__}: {e}", flush=True)
+        raise
+    print("Bot started.", flush=True)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        print("Webhook deleted.", flush=True)
+    except Exception as e:
+        print(f"DELETE WEBHOOK ERROR: {type(e).__name__}: {e}", flush=True)
+    print("Starting polling...", flush=True)
     await dp.start_polling(bot)
